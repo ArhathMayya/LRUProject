@@ -79,3 +79,19 @@ func (c *LRUCache) removeNode(n *node) {
 		n.next.prev = n.prev
 	}
 }
+
+func (c *LRUCache) removeSpecificNode(key string) {
+	currentNode := c.lruList.head
+
+	// Traverse the linked list until you find a node with the desired key
+	for currentNode != nil {
+		if currentNode.key == key {
+			// If the current node has the desired key, remove it using removeNode
+			cache.removeNode(currentNode)
+			// Break out of the loop since we found and removed the node
+			break
+		}
+		// Move to the next node
+		currentNode = currentNode.next
+	}
+}

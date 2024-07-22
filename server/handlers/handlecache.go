@@ -2,9 +2,23 @@ package handlers
 
 import (
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
+
+var CacheChan = make(chan string)
+var Broadcast = make(chan map[string]string)
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Adjust this for more secure origin checks
+	},
+}
+
+var clients = make(map[*websocket.Conn]bool)
 
 type CacheData struct {
 	Key        string
@@ -14,7 +28,7 @@ type CacheData struct {
 
 type LRUCache struct {
 	capacity int
-	cache    map[string]*node
+	cache    map[string]*CacheData
 	lruList  linkedList
 	mutex    sync.Mutex
 }
@@ -22,7 +36,7 @@ type LRUCache struct {
 func NewLRUCache(capacity int) *LRUCache {
 	return &LRUCache{
 		capacity: capacity,
-		cache:    make(map[string]*node),
+		cache:    make(map[string]*CacheData),
 		lruList:  linkedList{},
 	}
 }
@@ -36,11 +50,16 @@ func (c *LRUCache) Setcache(key string, value string, expiration time.Duration) 
 	// Check if the key is present in the cache
 	if n, ok := c.cache[key]; ok {
 		// Update the value and expiration time
-		n.value = value
+		n.Value = value
 		n.ExpiryTime = time.Now().Add(expiration)
-
+		c.removeSpecificNode(key)
 		// Move the most recently used key-value pair to the front of the cache list
-		c.lruList.moveToFront(n)
+		newNode := &node{
+			key:        key,
+			value:      value,
+			ExpiryTime: n.ExpiryTime,
+		}
+		c.lruList.addToFront(newNode)
 		return
 	}
 
@@ -50,13 +69,20 @@ func (c *LRUCache) Setcache(key string, value string, expiration time.Duration) 
 	}
 
 	// Add the new entry to the cache
+	expirytime := time.Now().Add(expiration)
 	n := &node{
 		key:        key,
 		value:      value,
-		ExpiryTime: time.Now().Add(expiration),
+		ExpiryTime: expirytime,
 	}
 	c.lruList.addToFront(n)
-	c.cache[key] = n
+	ch := &CacheData{
+		Key:        key,
+		Value:      value,
+		ExpiryTime: expirytime,
+	}
+	c.cache[key] = ch
+	CacheChan <- "done"
 }
 
 func (c *LRUCache) Getcache(key string) (string, bool) {
@@ -67,25 +93,26 @@ func (c *LRUCache) Getcache(key string) (string, bool) {
 	if n, ok := c.cache[key]; ok {
 
 		n.ExpiryTime = time.Now().Add(5 * time.Second)
+		// c.cache[key] = n
 		//Once get cache request is made chace epiry limit will be inceased.
-		//Example set cache is made a 10.00.00 AM and now expiry time is 10.00.05 AM.
+		//Example set cache is made a 10.00.00 AM and now expiry time is 10.00.020 AM.
 		// Now get cache request is made at 10.00.03 AM and now expiry time will be 10.00.08 AM.
 
 		// Move the entry to the front of the cache list (most recently used)
-		c.lruList.moveToFront(n)
-		return n.value, true
+		c.removeSpecificNode(key)
+		newNode := &node{
+			key:        key,
+			value:      n.Value,
+			ExpiryTime: n.ExpiryTime,
+		}
+		c.lruList.addToFront(newNode)
+		CacheChan <- "done"
+
+		// c.lruList.moveToFront(n)
+		return n.Value, true
 	}
 	return "", false
 }
-
-func (c *LRUCache) deleteLRUEntry() {
-	if c.lruList.tail != nil {
-		delete(c.cache, c.lruList.tail.key)
-		c.lruList.removeTail()
-	}
-}
-
-// Here we will print the cache list for every get and set request
 func printCacheContents(cache *LRUCache) {
 
 	fmt.Println("Current Cache Contents:")
@@ -113,10 +140,22 @@ func HandleGetcache(Key string) (string, bool) {
 	return data, flag
 }
 
-func HandleSetcache(Key, Value string) string {
+func HandleSetcache(Key, Value string, Seconds int) string {
+	fmt.Println("Time Got: ", Seconds)
+
+	// secondsInt, err := strconv.Atoi(Seconds)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// }
 	fmt.Println("SET CACHE TIME", time.Now())
 	fmt.Println("Set Cache Value")
-	cache.Setcache(Key, Value, 5*time.Second)
+	if Seconds < 1 && Seconds > 9 {
+		return "Invalid Time Duration"
+
+	}
+	duration := time.Duration(Seconds) * time.Second
+	cache.Setcache(Key, Value, duration)
+
 	printCacheContents(cache)
 
 	return "Cache Entered"
@@ -124,10 +163,11 @@ func HandleSetcache(Key, Value string) string {
 
 func CleanupExpiredEntries() {
 	for {
-		time.Sleep(1 * time.Second) // Wait for 1 second
+		// time.Sleep(1 * time.Second) // Wait for 1 second
 
 		cache.mutex.Lock()
 
+		// Get the current time
 		if len(cache.cache) == 0 {
 			cache.mutex.Unlock()
 			continue
@@ -135,17 +175,36 @@ func CleanupExpiredEntries() {
 
 		// Iterate over cache entries and remove expired ones
 		for key, n := range cache.cache {
-
-			// check time for every iteration
 			currentTime := time.Now()
 			// Check if the entry has expired
 			if currentTime.After(n.ExpiryTime) {
 				fmt.Printf("Removing expired cache entry with key: %s and time: %s\n", key, currentTime)
 				delete(cache.cache, key)
-				cache.removeNode(n)
+				cache.removeSpecificNode(key)
+				CacheChan <- "done"
 			}
 		}
 
 		cache.mutex.Unlock()
+	}
+}
+
+func (c *LRUCache) deleteLRUEntry() {
+	if c.lruList.tail != nil {
+		delete(c.cache, c.lruList.tail.key)
+		c.lruList.removeTail()
+	}
+}
+
+func SendUpdate() {
+	for {
+		select {
+		case <-CacheChan:
+			cacheContent := make(map[string]string)
+			for key, data := range cache.cache {
+				cacheContent[key] = data.Value
+			}
+			Broadcast <- cacheContent
+		}
 	}
 }

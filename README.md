@@ -46,11 +46,12 @@ Brief description of the project.
 
 #### Frontend Interface:
    1. Users can interact with the cache management system through a user-friendly React frontend.
-   2. The interface enables users to set key-value pairs as cache entries and retrieve cached values within the specified time limit.
+   2. The interface enables users to set key-value pairs as cache entries and retrieve cached values within the given time limit. Either you can manually set expire time from 1-9 seconds or defaulty its set to 5 seconds.
 
 #### Backend Implementation:
 1. The backend is built using Golang and the Gin framework, providing robust and efficient handling of cache operations.
 2. Custom implementations, including a doubly linked list, are utilized to store and manage cache entries effectively.
+3. Backend includes channels and websocket to provide real time cache content update.
 
 #### Cache Management Policies:
    1.  The system employs a size limit for cache storage, with a maximum capacity of 1024 entries.
