@@ -2,23 +2,14 @@ package handlers
 
 import (
 	"fmt"
-	"net/http"
+	// "net/http"
 	"sync"
 	"time"
-
-	"github.com/gorilla/websocket"
+	// "github.com/gorilla/websocket"
 )
 
 var CacheChan = make(chan string)
 var Broadcast = make(chan map[string]string)
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Adjust this for more secure origin checks
-	},
-}
-
-var clients = make(map[*websocket.Conn]bool)
 
 type CacheData struct {
 	Key        string

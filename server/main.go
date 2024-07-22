@@ -13,7 +13,7 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Adjust this for more secure origin checks
+		return true
 	},
 }
 
@@ -66,8 +66,9 @@ func main() {
 	// config.AllowOrigins = []string{"http://localhost:3000"}
 	// r.Use(cors.New(config))
 	go handlers.CleanupExpiredEntries()
-	go handlers.SendUpdate()
 	// cleaning of cache will run in a separate thread.
+	go handlers.SendUpdate()
+	// We will be sending realtime cache content update.
 
 	r.GET("/get/:key", controllers.Getcache)
 	r.POST("/set", controllers.Setcache)
@@ -77,7 +78,7 @@ func main() {
 		handleConnections(c)
 	})
 
-	go handleMessages()
+	go handleMessages() // Not required as of now
 
 	r.Run(":8000") // Server will start running at port 8000
 }
